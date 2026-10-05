@@ -2,7 +2,12 @@
 #include <stdlib.h>
 #include <mpi.h>
 
-/* Function prototypes */
+//have process 0 read input data. and distribuite among process, also it must print out program
+//create bins ranging from the given input, n = amount of bins, b-a/n will be the width
+
+
+
+//function prototype
 int Read_input(int* data_count_p, double* a_p, double* b_p, int* bin_count_p, int my_rank, MPI_Comm comm);
 
 void Find_distribution(int data_count, int comm_sz, int send_counts[], int displacements[]);
@@ -43,9 +48,10 @@ int main(void) {
     MPI_Comm_rank(comm, &my_rank);
     MPI_Comm_size(comm, &comm_sz);
 
-    /* Read and broadcast the input */
+    //read input
     valid_input = Read_input(&data_count, &a, &b, &bin_count, my_rank, comm);
 
+    //sanity check, program ends when input is invalid
     if (!valid_input) {
         if (my_rank == 0) {
             printf("Invalid input.\n");
@@ -55,23 +61,15 @@ int main(void) {
         return 1;
     }
 
-    /*
-     * Every process calculates how many measurements it receives.
-     * Some processes may receive one additional measurement.
-     */
+    //calculates how much shouyld it take per
     local_data_count = data_count / comm_sz + (my_rank < data_count % comm_sz);
 
-    /*
-     * Allocate the current process's local arrays.
-     * Allocate at least one position even if local_data_count is zero.
-     */
+    //allocate
     local_data = malloc((local_data_count > 0 ? local_data_count : 1) * sizeof(double));
 
     local_bin_counts = calloc(bin_count, sizeof(int));
 
-    /*
-     * Only process 0 needs the complete data and distribution arrays.
-     */
+    //process 0 does heavy lifinting thefore only malloc is needed for it
     if (my_rank == 0) {
         data = malloc(data_count * sizeof(double));
         send_counts = malloc(comm_sz * sizeof(int));
@@ -82,26 +80,19 @@ int main(void) {
         Generate_measurements(data, data_count, a, b);
     }
 
-    /*
-     * Distribute the measurements from process 0.
-     */
+    //distribute measurements from process 0
     MPI_Scatterv(data, send_counts, displacements, MPI_DOUBLE, local_data, local_data_count, MPI_DOUBLE, 0, comm);
 
-    /*
-     * Each process counts its local measurements.
-     */
+    //count local bins
     Count_local_bins(local_data, local_data_count, local_bin_counts, bin_count, a, b);
 
-    /*
-     * Combine the local counts and print the result.
-     */
+    //combine 
     Reduce_and_print(data, data_count, local_bin_counts, bin_count, a, b, my_rank, comm);
 
     //Free memory
     free(local_bin_counts);
     free(local_data);
 
-    /* Free memory used only by process 0 */
     if (my_rank == 0) {
         free(displacements);
         free(send_counts);
@@ -112,12 +103,9 @@ int main(void) {
     return 0;
 }
 
-/*
- * Process 0 reads the input.
- * MPI_Bcast sends the input to every process.
- */
+// process 0 reads input and also distribuites it
 int Read_input(int* data_count_p, double* a_p, double* b_p, int* bin_count_p, int my_rank, MPI_Comm comm){
-
+    //saninty check when user inputs nothing it will return 0 else return 1 and end program
     int valid_input = 1;
 
     *data_count_p = 0;
@@ -150,19 +138,14 @@ int Read_input(int* data_count_p, double* a_p, double* b_p, int* bin_count_p, in
             valid_input = 0;
         }
 
-        if (
-            *data_count_p <= 0 ||
-            *bin_count_p <= 0 ||
-            *b_p <= *a_p
-        ) {
+        if (*data_count_p <= 0 || *bin_count_p <= 0 || *b_p <= *a_p) {
             valid_input = 0;
         }
     }
 
-    /* Broadcast the input status */
+    //ditribute proper measurements to every process coresposnding to its name upper, lower, etc
     MPI_Bcast(&valid_input, 1, MPI_INT, 0, comm);
 
-    /* Broadcast the input values */
     MPI_Bcast(data_count_p, 1, MPI_INT, 0, comm);
 
     MPI_Bcast(a_p, 1, MPI_DOUBLE, 0, comm);
@@ -175,83 +158,65 @@ int Read_input(int* data_count_p, double* a_p, double* b_p, int* bin_count_p, in
 }
 
 
-/*-------------------------------------------------------------------*/
-/*
- * Calculates how many measurements each process receives
- * and where each process's section begins.
- */
+// Calculates how many measurements each process receives and where each process's section begins.
 void Find_distribution(int data_count, int comm_sz, int send_counts[], int displacements[]){
 
     int i;
     int base_count;
     int remainder;
-
+    
+    //calcs how much per section, ex: data cout of 22 and comm_sz of 4, therefore it takes 5 increments
     base_count = data_count / comm_sz;
     remainder = data_count % comm_sz;
 
     for (i = 0; i < comm_sz; i++) {
-        send_counts[i] =
-            base_count + (i < remainder);
+        send_counts[i] = base_count + (i < remainder);
 
+        //find where each process should start if index 0 its starts process 0
+        //esle would be calc with previous index plus send_counts to find its index
         if (i == 0) {
             displacements[i] = 0;
         } else {
-            displacements[i] =
-                displacements[i - 1] +
-                send_counts[i - 1];
+            displacements[i] = displacements[i - 1] + send_counts[i - 1];
         }
     }
 }
 
 
-/*-------------------------------------------------------------------*/
-/*
- * Process 0 generates random measurements from a up to b.
- */
+//randomly generate numbers bewteen a-b
 void Generate_measurements(double data[], int data_count, double a, double b){
 
     int i;
 
-    /*
-     * A fixed seed makes repeated tests produce the same sequence
-     * on the same system.
-     */
     srand(1);
 
     for (i = 0; i < data_count; i++) {
-        data[i] =
-            a +
-            (b - a) *
-            ((double) rand() / ((double) RAND_MAX + 1.0));
+        data[i] = a + (b - a) * ((double) rand() / ((double) RAND_MAX + 1.0));
     }
 }
 
+//place process into the correct bin
 
-/*-------------------------------------------------------------------*/
-/*
- * Each process places its local measurements into histogram bins.
- */
 void Count_local_bins( double local_data[], int local_data_count, int local_bin_counts[], int bin_count, double a, double b){
 
     double bin_width;
     int bin;
     int i;
 
+    //calcs the width between interval
     bin_width = (b - a) / bin_count;
 
     for (i = 0; i < local_data_count; i++) {
-        /*
-         * Calculate the bin containing this measurement.
-         */
+        //sub lower bound and divide by width this gives the range away from value a
+        //example: value 5.7 and the ranges are 2(0-2)(2-4)... this would be placed in (4-6) because its 5.7
         bin = (int) ((local_data[i] - a) / bin_width);
 
-        /*
-         * If a value equals b, put it in the final bin.
-         */
+        //because index start 0 we cannot find last bin ex: bin 5 with ranges 8-10 therefore we explictly state it
         if (bin == bin_count) {
             bin = bin_count - 1;
         }
 
+        //prevents it from accessing memory outside of bin counts
         if (bin >= 0 && bin < bin_count) {
             local_bin_counts[bin]++;
         }
@@ -272,12 +237,12 @@ void Reduce_and_print(double data[], int data_count,int local_bin_counts[],int b
     double bin_high;
     int i;
 
+    //process 0 must print it out
     if (my_rank == 0) {
-        global_bin_counts = malloc(
-            bin_count * sizeof(int)
-        );
+        global_bin_counts = malloc(bin_count * sizeof(int));
     }
 
+    //combine all counts
     MPI_Reduce(local_bin_counts, global_bin_counts, bin_count, MPI_INT, MPI_SUM, 0, comm);
 
     if (my_rank == 0) {
@@ -296,21 +261,9 @@ void Reduce_and_print(double data[], int data_count,int local_bin_counts[],int b
             bin_high = bin_low + bin_width;
 
             if (i == bin_count - 1) {
-                printf(
-                    "Bin %d [%.2f, %.2f]: %d\n",
-                    i,
-                    bin_low,
-                    bin_high,
-                    global_bin_counts[i]
-                );
+                printf("Bin %d [%.2f, %.2f]: %d\n", i, bin_low, bin_high, global_bin_counts[i]);
             } else {
-                printf(
-                    "Bin %d [%.2f, %.2f): %d\n",
-                    i,
-                    bin_low,
-                    bin_high,
-                    global_bin_counts[i]
-                );
+                printf("Bin %d [%.2f, %.2f): %d\n", i, bin_low, bin_high, global_bin_counts[i]);
             }
         }
 
